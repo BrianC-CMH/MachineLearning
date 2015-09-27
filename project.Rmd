@@ -1,0 +1,252 @@
+---
+title: "Practical Machine Learning"
+author: "BrianC-CMH"
+date: "Sunday, September 27, 2015"
+output: html_document
+---
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.
+
+*Data was downloaded from: http://groupware.les.inf.puc-rio.br/har*
+
+## Initialize Application 
+
+```r
+library(caret)
+library(randomForest)
+library(corrplot)
+
+options(width=10000)
+set.seed(1234)
+
+```
+### Helper Functions
+
+```r
+cleanseDataset <- function(df) {
+  # Downloads data needed for the project exercise.
+  #
+  # Args:
+  #   df: data.frame to clean
+  #
+  # Returns:
+  #   ds: cleansed dataset (df)
+
+  # Get rid of NAs
+  df <- df[, colSums(is.na(df)) == 0] 
+  
+  # Get rid of non-numerics and other unfriendly fields
+  str.to.remove <- grepl("^X|timestamp|window", names(df))
+  df <- df[, !str.to.remove]
+  df <- df[, sapply(df, is.numeric)]
+
+}
+
+acquireData <- function() {
+  # Downloads data needed for the project exercise.
+  #
+  # Args:
+  #   None
+  #
+  # Returns:
+  #   None - only outputs downloaded file notifications
+
+  url.train <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  url.test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  
+  file.train <- "./data/pml-training.csv"
+  file.test  <- "./data/pml-testing.csv"
+  
+  if (!file.exists("./data")) {
+    dir.create("./data")
+  }
+  if (!file.exists(file.train)) {
+    download.file(url.train, destfile=file.train)
+    print("DOWNLOADED: training data")
+  }
+  if (!file.exists(file.test)) {
+    download.file(url.test, destfile=file.test)
+    print("DOWNLOADED: testing data")
+  }
+  print("Acquire data completed.")
+}
+```
+
+### Download the Data
+
+```r
+# Acquire data needed for project
+acquireData()
+
+# Load data needed for project
+ds.train <- read.csv("./data/pml-training.csv")
+ds.test <- read.csv("./data/pml-testing.csv")
+```
+
+```
+Train
+## [1] 19622    160
+Test
+## [1] 20    160
+```
+
+
+### Cleanse the Data
+The core (default) training data set contains 19,622 observations and 160 variables; the testing data set contains 20 observations and 160 variables. The 'classe' variable in the training set is the outcome variable that we'll be predicting.
+
+In order to cleanse the dataset for modeling, we'll do the following transformations (via helper function):
+
+1. Remove NAs (missing values) 
+
+2. TBD 
+
+3. Non-numeric values
+
+The remaining observations and columns will be what we use for modeling.
+
+```r
+# Eliminate columns that do not contribute much to the accelerometer measurements.
+classe <- ds.train$classe
+ds.clean.train <- cleanseDataset(ds.train)
+ds.clean.train$classe <- classe
+dim(ds.clean.train)
+```
+```
+Train
+## [1] 19622    53
+```
+By eliminating the unncessary fields, the data (width) is reduced to only 53 columns to improve model fitting performance.
+
+```r
+ds.clean.test <- cleanseDataset(ds.test)
+dim(ds.clean.test)
+```
+
+```
+Test
+## [1] 20 53
+```
+## Data Modeling
+### Partition the data
+Split the cleansed data set (training) into a training data set and validation data set (70/30 split). We'll use the validation data set for cross validation in future steps.  
+
+```r
+training.index <- createDataPartition(ds.clean.train$classe, p=0.70, list=F)
+m.ds.train <- ds.clean.train[training.index, ]
+m.ds.test <- ds.clean.test[-training.index, ]
+```
+
+### Modeling
+Use a **Random Forest** algorithm to predict activity recognition because it automatically selects important variables and is robust to (correlated) covariates, as well as outliers. We will use **5-fold cross validation** when applying the algorithm.  
+
+```r
+control.rf <- trainControl(method="cv", 5)
+model.rf <- train(classe ~ ., data=m.ds.train, method="rf", trControl=control.rf, ntree=250)
+model.rf
+```
+
+```
+## Random Forest 
+## 
+## 13737 samples
+##    52 predictor
+##     5 classes: 'A', 'B', 'C', 'D', 'E' 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (5 fold) 
+## Summary of sample sizes: 10989, 10989, 10990, 10989, 10991 
+## Resampling results across tuning parameters:
+## 
+##   mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+##    2    0.9896630  0.9869227  0.001301625  0.001646665
+##   27    0.9914100  0.9891336  0.002906890  0.003676991
+##   52    0.9844217  0.9802915  0.005005633  0.006332988
+## 
+## Accuracy was used to select the optimal model using  the largest value.
+## The final value used for the model was mtry = 27. 
+```
+Then, we estimate the performance of the model on the validation data set.  
+
+```r
+predictions.rf <- predict(model.rf, m.ds.test)
+confusionMatrix(m.ds.test$classe, predictions.rf)
+```
+
+```
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1673    0    0    0    1
+##          B    1 1138    0    0    0
+##          C    0    0 1024    2    0
+##          D    0    0    5  959    0
+##          E    0    0    0    1 1081
+## 
+## Overall Statistics
+##                                           
+##                Accuracy : 0.9983          
+##                  95% CI : (0.9969, 0.9992)
+##     No Information Rate : 0.2845          
+##     P-Value [Acc > NIR] : < 2.2e-16       
+##                                           
+##                   Kappa : 0.9979          
+##  Mcnemar's Test P-Value : NA              
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity            0.9994   1.0000   0.9951   0.9969   0.9991
+## Specificity            0.9998   0.9998   0.9996   0.9990   0.9998
+## Pos Pred Value         0.9994   0.9991   0.9981   0.9948   0.9991
+## Neg Pred Value         0.9998   1.0000   0.9990   0.9994   0.9998
+## Prevalence             0.2845   0.1934   0.1749   0.1635   0.1839
+## Detection Rate         0.2843   0.1934   0.1740   0.1630   0.1837
+## Detection Prevalence   0.2845   0.1935   0.1743   0.1638   0.1839
+## Balanced Accuracy      0.9996   0.9999   0.9974   0.9979   0.9994
+```
+
+```r
+accuracy <- postResample(predictions.rf, m.ds.test$classe)
+accuracy
+```
+
+```
+##  Accuracy     Kappa 
+## 0.9983008 0.9978507 
+```
+
+```r
+out.of.sample.error <- 1 - as.numeric(confusionMatrix(m.ds.test$classe, predictions.rf)$overall[1])
+out.of.sample.error
+```
+
+```
+## [1] 0.001699235
+```
+The estimated accuracy of the model is 99.83% and the estimated out-of-sample error is 0.002%.
+
+## Predictions
+Apply the model to the original testing data set downloaded from the data source.
+
+```r
+results <- predict(model.rf, ds.test.cleansed[, -length(names(ds.test.cleansed))])
+results
+```
+
+```
+##  [1] B A B A A E D B A A B C B A E E A B B B
+## Levels: A B C D E
+```
+
+## Appendix: Figures
+1. Correlation Matrix Visualization  
+```r
+corrPlot <- cor(m.ds.train[, -length(names(m.ds.train))])
+corrplot(corrPlot, method="color",title="Accelerometer Correlations")
+```
+
+![correlations](correlations.png) 
